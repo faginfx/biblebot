@@ -1,4 +1,4 @@
-import yfinance as yf, time, requests, os
+import time, requests, os
 from flask import Flask
 import threading
 
@@ -9,7 +9,7 @@ SYMBOLS = {"EURUSD": "EURUSD=X", "GOLD": "GC=F", "BTC": "BTC-USD"}
 app = Flask(__name__)
 @app.route('/')
 def home():
-    return "BIBLE BOT 24/7 LIVE"
+    return "BIBLE BOT 24/7 LIVE - FIXED 429"
 
 def send(msg):
     try:
@@ -18,30 +18,51 @@ def send(msg):
     except Exception as e:
         print(e)
 
+def get_closes(ticker):
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=15m&range=5d"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        r = requests.get(url, headers=headers, timeout=15)
+        data = r.json()
+        closes = data['chart']['result'][0]['indicators']['quote'][0]['close']
+        closes = [c for c in closes if c is not None]
+        return closes
+    except Exception as e:
+        print(f"Fetch error {ticker}: {e}")
+        return []
+
+def ema(prices, period):
+    if len(prices) < period: return 0
+    k = 2/(period+1)
+    ema_val = sum(prices[:period])/period
+    for p in prices[period:]:
+        ema_val = p*k + ema_val*(1-k)
+    return ema_val
+
 def scan():
-    send("✅ BIBLE BOT 24/7 IS LIVE! Watching EURUSD + GOLD + BTC\nFixed GOLD symbol - scanning every 60s")
+    send("✅ BIBLE BOT 24/7 IS LIVE! Fixed 429 error\nWatching EURUSD + GOLD + BTC\nScanning every 2 mins")
     while True:
         for name, ticker in SYMBOLS.items():
-            try:
-                df = yf.download(ticker, period="2d", interval="15m", progress=False, auto_adjust=True)
-                if len(df) < 25: 
-                    print(f"{name} no data")
-                    continue
-                df['EMA21'] = df['Close'].ewm(span=21).mean()
-                df['EMA8'] = df['Close'].ewm(span=8).mean()
-                last = df.iloc[-1]
-                price = float(last['Close'])
-                ema21 = float(last['EMA21'])
-                dist = abs(price-ema21)/price*100
-                print(f"{name} {price:.2f} EMA21 {ema21:.2f} dist {dist:.2f}%")
-                if dist < 0.5:
-                    if price > ema21:
-                        send(f"🚀 {name} BUY setup near EMA21\nPrice: {price}\nDist: {dist:.2f}% - Page 98 Pin")
-                    else:
-                        send(f"🔻 {name} SELL setup near EMA21\nPrice: {price}\nDist: {dist:.2f}% - Page 98 Pin")
-            except Exception as e:
-                print(f"Error {name}: {e}")
-        time.sleep(60)
+            closes = get_closes(ticker)
+            if len(closes) < 30:
+                print(f"{name} not enough data {len(closes)}")
+                time.sleep(5)
+                continue
+
+            price = closes[-1]
+            ema21 = ema(closes, 21)
+            ema8 = ema(closes, 8)
+            dist = abs(price-ema21)/price*100
+
+            print(f"{name} Price:{price:.4f} EMA21:{ema21:.4f} Dist:{dist:.2f}%")
+
+            if dist < 0.6:
+                if price > ema21 and ema8 > ema21:
+                    send(f"🚀 BIBLE BUY SIGNAL: {name}\nPrice: {price}\nEMA21: {ema21:.2f}\nDist: {dist:.2f}% to EMA21\nStrategy: Page 98 Pin")
+                elif price < ema21 and ema8 < ema21:
+                    send(f"🔻 BIBLE SELL SIGNAL: {name}\nPrice: {price}\nEMA21: {ema21:.2f}\nDist: {dist:.2f}% to EMA21\nStrategy: Page 98 Pin")
+            time.sleep(10)
+        time.sleep(120)
 
 threading.Thread(target=scan, daemon=True).start()
 
